@@ -1,7 +1,7 @@
 {
   "uuid": "shiftdrop@jayhemnani",
   "name": "ShiftDrop",
-  "description": "Hold Shift while dragging a file to open the ShiftDrop conversion wheel. Needs the ShiftDrop app.",
+  "description": "Hold Shift while dragging a file to open the ShiftDrop conversion wheel under the pointer; add Ctrl for tools. Converting is done by the ShiftDrop app, which this extension needs: install it from https://github.com/jayhemnani9910/shiftdrop-rust",
   "shell-version": ["49", "50", "51"],
   "url": "https://github.com/jayhemnani9910/shiftdrop-rust"
 }
