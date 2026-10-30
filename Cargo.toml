@@ -1,0 +1,21 @@
+[package]
+name = "shiftdrop"
+version = "0.1.0"
+edition = "2024"
+description = "Drag a file, hold Shift, pick a format. Local file converter for GNOME on Linux"
+
+# System dependencies (apt):
+#   - libgtk-4-dev                  to build the UI
+#   - ffmpeg/ffprobe                video + audio
+#   - imagemagick                   images
+#   - ghostscript, poppler-utils    PDF compress / pages / text
+#   - libreoffice                   PDF/TXT -> DOCX
+
+[dependencies]
+async-channel = "2.5.0"
+clap = { version = "4.6.7", features = ["derive"] }
+gtk = { version = "0.11.5", package = "gtk4", features = ["v4_12"] }
+libc = "0.2.191"
+pangocairo = "0.22.9"
+serde_json = "1.0.154"
+tempfile = "3.27.0"
