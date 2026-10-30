@@ -1,3 +1,5 @@
+// on Windows the app has no console; `shiftdrop-cli.exe` is the command line there
+#![cfg_attr(windows, windows_subsystem = "windows")]
 //! shiftdrop                          run the app (the extension starts it on demand)
 //! shiftdrop FILE...                  open the wheel for these files, pick by clicking
 //! shiftdrop convert --to FMT FILE...
@@ -7,6 +9,8 @@
 mod app;
 #[cfg(target_os = "linux")]
 mod wheel;
+#[cfg(windows)]
+mod win;
 
 use std::process::ExitCode;
 
@@ -17,4 +21,9 @@ fn main() -> ExitCode {
         return shiftdrop::cli::main();
     }
     ExitCode::from(app::main(&argv).get() as u8)
+}
+
+#[cfg(windows)]
+fn main() -> ExitCode {
+    win::main()
 }

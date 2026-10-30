@@ -809,6 +809,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "windows",
+ "windows-core",
+ "windows-numerics",
 ]
 
 [[package]]
