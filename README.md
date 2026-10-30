@@ -72,6 +72,18 @@ cargo test     # planned commands + real conversions on tiny generated files, a 
 `drag-begin` -> `shift at` -> `show-wheel ok` -> `wheel placed` -> `drag carries` -> `drop at` -> the job result.
 The first missing line is where it broke. `rm ~/.cache/shiftdrop-debug` to stop.
 
+## After a GNOME upgrade
+
+The extension lists the GNOME Shell versions it was tried on (`shell-version` in `metadata.json`), and it
+finds the wheel by its window title, which a Shell change can quietly break. After each upgrade:
+
+```
+gnome-extensions info shiftdrop@jayhemnani    # State: ACTIVE. OUT OF DATE means add the new version to metadata.json
+```
+
+Then do one Shift-drag with the debug flag on (above). `show-wheel ok` without `wheel placed` means the
+Shell no longer hands over the window the way `_onWindowCreated` expects.
+
 ## Speed
 
 Measured on this machine (8 cores, Intel GPU), 1080x1920 60 fps phone clip. Quality is SSIM against the
