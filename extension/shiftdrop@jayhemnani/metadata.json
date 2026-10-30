@@ -3,5 +3,5 @@
   "name": "ShiftDrop",
   "description": "Hold Shift while dragging a file to open the ShiftDrop conversion wheel. Needs the ShiftDrop app.",
   "shell-version": ["49", "50", "51"],
-  "url": "https://github.com/jayhemnani9910/shiftdrop"
+  "url": "https://github.com/jayhemnani9910/shiftdrop-rust"
 }
