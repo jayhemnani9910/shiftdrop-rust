@@ -5,7 +5,8 @@ use std::io::{BufRead, BufReader, ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Mutex, mpsc};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -17,6 +18,9 @@ use crate::media::{gpu_h264, output_with_timeout, probe};
 // screenshots on 8 cores, and 8 at a time adds little. Video and audio run one
 // at a time, since ffmpeg and the GPU already use the whole machine.
 const PARALLEL: usize = 4;
+
+// how often a running command checks for Cancel
+const CANCEL_POLL: Duration = Duration::from_millis(100);
 
 /// One file per running job, listing the outputs it is writing. A job killed
 /// mid-write (pkill, logout, out of memory) leaves its file here, and
@@ -253,17 +257,42 @@ fn run_command(cmd: &[String], duration: Option<f64>, on_progress: &dyn Fn(f64),
         let _ = stderr.read_to_end(&mut buf);
         let _ = send.send(String::from_utf8_lossy(&buf).into_owned());
     });
+    // stdout too: most tools print nothing, and Cancel must not wait for a line that never comes
     let stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
-    for line in stdout.lines().map_while(Result::ok) {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            break;
+    let (send, lines) = mpsc::channel();
+    thread::spawn(move || {
+        for line in stdout.lines().map_while(Result::ok) {
+            if send.send(line).is_err() {
+                break;
+            }
         }
+    });
+    let progress = |line: String| {
         if let Some(fraction) = parse_progress(line.trim(), duration) {
             on_progress(fraction);
         }
-    }
-    let status = child.wait().map_err(|e| e.to_string())?;
+    };
+    let status = loop {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = child.kill();
+            break child.wait().map_err(|e| e.to_string())?;
+        }
+        let closed = match lines.recv_timeout(CANCEL_POLL) {
+            Ok(line) => {
+                progress(line);
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => true,
+            Err(RecvTimeoutError::Timeout) => false,
+        };
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
+        }
+        if closed {
+            thread::sleep(CANCEL_POLL); // stdout closed but still running: recv no longer waits
+        }
+    };
+    lines.try_iter().for_each(progress);
     let err_text = err_text.recv_timeout(Duration::from_secs(5)).unwrap_or_default();
     if cancel.load(Ordering::Relaxed) {
         return Err("Cancelled".into());

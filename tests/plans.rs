@@ -318,3 +318,20 @@ fn output_goes_to_fallback_when_folder_is_read_only() {
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(out, fallback.join("photo.jpg"));
 }
+
+#[test]
+fn cancel_stops_a_command_that_prints_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut job = Job::new("x", vec![tmp.path().join("in")], vec![tmp.path().join("out.txt")],
+                           vec![shiftdrop::cmd!["sleep", "30"]]);
+    let cancel = AtomicBool::new(false);
+    let started = std::time::Instant::now();
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        assert_eq!(run(&mut job, &|_| {}, &cancel), Err("Cancelled".into()));
+    });
+    assert!(started.elapsed().as_secs() < 2, "took {:?}", started.elapsed());
+}
