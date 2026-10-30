@@ -4,6 +4,7 @@
 //! placing the wheel) is done here by `hook`; the wheel is an ordinary OLE drop
 //! target (`drop`), and both windows are drawn by `paint`. Everything after the
 //! pick (planning, running, the summary) is shared with Linux in `session`.
+mod ask;
 mod drop;
 mod hook;
 mod paint;
@@ -14,31 +15,37 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::Instant;
 
-use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT,
+                                  WPARAM};
 use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MonitorFromPoint};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Ole::{IDropTarget, OleInitialize, RegisterDragDrop};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor, MDT_EFFECTIVE_DPI, SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_ESCAPE};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, HWND_MESSAGE, HWND_TOPMOST, IDC_ARROW, KillTimer,
+    ASFW_ANY, AllowSetForegroundWindow, CreateWindowExW, DefWindowProcW, DispatchMessageW, FindWindowExW, GWL_EXSTYLE,
+    GetCursorPos, GetMessageW, GetWindowLongPtrW, HWND_MESSAGE, HWND_TOPMOST, IDC_ARROW, IsDialogMessageW, KillTimer,
     LoadCursorW, MSG, PostMessageW, RegisterClassExW, SPI_GETWORKAREA, SW_HIDE, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetTimer, SetWindowPos, ShowWindow,
-    SystemParametersInfoW, TranslateMessage, WM_APP, WM_LBUTTONUP, WM_MOUSEMOVE, WM_TIMER, WNDCLASSEXW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SetForegroundWindow,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW, TranslateMessage, WA_INACTIVE,
+    WM_ACTIVATE, WM_APP, WM_COPYDATA, WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_RBUTTONUP, WM_TIMER, WNDCLASSEXW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 use windows::core::{HSTRING, PCWSTR, Result, w};
 
 use shiftdrop::formats::name;
 use shiftdrop::jobs::sweep_leftovers;
+use shiftdrop::media::probe;
 use shiftdrop::ring::{self, SIZE};
 use shiftdrop::session::{self, BUSY, Choice, MOVE_ONLY, Wheel};
 use shiftdrop::sys;
@@ -87,6 +94,7 @@ struct App {
     title: String,
     updates: Option<Receiver<Update>>,
     status: Status,
+    asking: Option<ask::Ask>,
 }
 
 thread_local! {
@@ -100,6 +108,8 @@ fn with_app<T>(f: impl FnOnce(&mut App) -> T) -> Option<T> {
 }
 
 static STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+/// The open trim/resize dialog, for Tab and Enter in the message loop.
+static ASK_HWND: AtomicIsize = AtomicIsize::new(0);
 
 fn log_path() -> PathBuf {
     sys::cache_dir().join("shiftdrop").join("shiftdrop.log")
@@ -117,7 +127,16 @@ pub fn main() -> ExitCode {
     let _ = fs::create_dir_all(log_path().parent().unwrap());
     let _ = fs::write(log_path(), "");
     STARTED.get_or_init(Instant::now);
-    match run() {
+    sys::refresh_path();
+    // `shiftdrop FILE...` from Explorer's Send To: pick by clicking
+    let files: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    // one copy runs: a second launch hands its files to it and leaves
+    let first = unsafe { CreateMutexW(None, false, w!("Local\\ShiftDrop")).is_ok() && GetLastError() != ERROR_ALREADY_EXISTS };
+    if !first {
+        hand_over(&files);
+        return ExitCode::SUCCESS;
+    }
+    match run(files) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             log(&format!("could not start: {e}"));
@@ -126,7 +145,23 @@ pub fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<()> {
+/// Send `files` to the copy that's already running, to open its wheel.
+fn hand_over(files: &[PathBuf]) {
+    if files.is_empty() {
+        return;
+    }
+    let paths: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+    let data: Vec<u16> = paths.join("\0").encode_utf16().collect();
+    let message = COPYDATASTRUCT { dwData: 1, cbData: (data.len() * 2) as u32, lpData: data.as_ptr() as *mut _ };
+    unsafe {
+        let Ok(running) = FindWindowExW(Some(HWND_MESSAGE), None, w!("ShiftDropMain"), None) else { return };
+        // we were just started by a click, so we may let it come to the front
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+        SendMessageW(running, WM_COPYDATA, None, Some(LPARAM(&message as *const _ as isize)));
+    }
+}
+
+fn run(files: Vec<PathBuf>) -> Result<()> {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         OleInitialize(None)?; // drag and drop needs OLE on this thread
@@ -156,6 +191,7 @@ fn run() -> Result<()> {
             cancel: Arc::default(),
             title: String::new(),
             updates: None,
+            asking: None,
             status: Status { title: String::new(), detail: String::new(), failed: false, progress: None,
                              outputs: vec![], hover: None, hovered: false, lingering: false },
         });
@@ -163,10 +199,17 @@ fn run() -> Result<()> {
     })?;
     hook::start(main);
     log("ready: drag a file and hold Shift");
+    if !files.is_empty() {
+        with_app(|app| app.pick(files));
+    }
 
     let mut msg = MSG::default();
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            let ask = ASK_HWND.load(Ordering::Relaxed);
+            if ask != 0 && IsDialogMessageW(HWND(ask as *mut _), &msg).as_bool() {
+                continue; // Tab, Enter and Esc in the trim/resize dialog
+            }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -216,6 +259,15 @@ fn bring_up(hwnd: HWND) {
     }
 }
 
+/// The wheel never takes focus during a drag; in click mode it must.
+fn set_activatable(hwnd: HWND, yes: bool) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let no_activate = WS_EX_NOACTIVATE.0 as isize;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, if yes { style & !no_activate } else { style | no_activate });
+    }
+}
+
 fn hide(hwnd: HWND) {
     unsafe {
         let _ = ShowWindow(hwnd, SW_HIDE);
@@ -261,6 +313,35 @@ impl App {
         self.origin = POINT { x: at.x - half, y: at.y - half };
         self.paint_wheel();
         bring_up(self.wheel_hwnd);
+    }
+
+    /// Open the wheel at the pointer for files picked in Explorer: choose by clicking.
+    fn pick(&mut self, files: Vec<PathBuf>) {
+        let mut at = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut at);
+        }
+        log(&format!("pick {} file(s) at {},{}", files.len(), at.x, at.y));
+        self.wheel = Wheel::new(files, false, true, vec![]);
+        self.visible = true;
+        self.dropping = false;
+        self.scale = scale_at(at, false);
+        let half = (SIZE as f32 * self.scale / 2.0) as i32;
+        self.origin = POINT { x: at.x - half, y: at.y - half };
+        self.paint_wheel();
+        // clicks and Esc need the wheel to take focus this time
+        set_activatable(self.wheel_hwnd, true);
+        bring_up(self.wheel_hwnd);
+        unsafe {
+            let _ = SetForegroundWindow(self.wheel_hwnd);
+        }
+    }
+
+    fn end_pick(&mut self) {
+        self.wheel.picking = false;
+        self.visible = false;
+        hide(self.wheel_hwnd);
+        set_activatable(self.wheel_hwnd, false);
     }
 
     fn drag_ended(&mut self) {
@@ -349,10 +430,61 @@ fn dropped(files: Vec<PathBuf>, at: (i32, i32), copy: bool) -> bool {
 impl App {
     fn start(&mut self, files: Vec<PathBuf>, choice: Choice) {
         match choice {
-            Choice::Tool(tool) if tool.asks.is_some() => {
-                self.finished(vec![], vec![format!("{} isn't on Windows yet.", tool.title)]);
-            }
+            Choice::Tool(tool) if tool.asks.is_some() => self.ask(tool, files),
             _ => self.run_in_background(files, choice, Params::default()),
+        }
+    }
+
+    /// Trim and resize ask for a value first.
+    fn ask(&mut self, tool: &'static shiftdrop::tools::Tool, files: Vec<PathBuf>) {
+        let length = if tool.asks == Some(shiftdrop::tools::Asks::Trim) {
+            match probe(&files[0]).duration.filter(|d| *d > 0.0) {
+                Some(length) => length,
+                None => {
+                    self.finished(vec![], vec![format!("{}: can't read its length", name(&files[0]))]);
+                    return;
+                }
+            }
+        } else {
+            0.0
+        };
+        if let Some(old) = self.asking.take() {
+            old.into_job();
+        }
+        let mut at = POINT::default();
+        unsafe {
+            let _ = GetCursorPos(&mut at);
+        }
+        match ask::open(tool, files, length, scale_at(at, false), ask_proc) {
+            Ok(dialog) => {
+                ASK_HWND.store(dialog.hwnd.0 as isize, Ordering::Relaxed);
+                self.asking = Some(dialog);
+            }
+            Err(e) => log(&format!("could not open the {} dialog: {e}", tool.title)),
+        }
+    }
+
+    fn answered(&mut self, action: ask::Action) {
+        let Some(dialog) = self.asking.take() else { return };
+        ASK_HWND.store(0, Ordering::Relaxed);
+        let params = match action {
+            ask::Action::Cancel => {
+                dialog.into_job();
+                return;
+            }
+            ask::Action::Start => dialog.params(),
+        };
+        match params {
+            Ok(params) => {
+                let (tool, files) = dialog.into_job();
+                self.run_in_background(files, Choice::Tool(tool), params);
+            }
+            Err(problem) => {
+                // keep the dialog open to fix the value
+                ASK_HWND.store(dialog.hwnd.0 as isize, Ordering::Relaxed);
+                self.asking = Some(dialog);
+                self.finished(vec![], vec![problem]);
+            }
         }
     }
 
@@ -565,13 +697,71 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam
         WM_WORK => {
             with_app(|app| app.drain_updates());
         }
+        WM_COPYDATA => {
+            let message = unsafe { &*(lparam.0 as *const COPYDATASTRUCT) };
+            let data = unsafe { std::slice::from_raw_parts(message.lpData as *const u16, message.cbData as usize / 2) };
+            let files: Vec<PathBuf> = String::from_utf16_lossy(data).split('\0').filter(|s| !s.is_empty())
+                .map(PathBuf::from).collect();
+            with_app(|app| app.pick(files));
+            return LRESULT(1);
+        }
         _ => return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
     LRESULT(0)
 }
 
+/// Mouse and keys reach the wheel only in click mode; during a drag OLE talks to it instead.
 unsafe extern "system" fn wheel_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    let picking = || with_app(|app| app.wheel.picking).unwrap_or(false);
+    // client px -> screen px, which is what hover and hit-testing take
+    let screen = |app: &App| (app.origin.x + (lparam.0 & 0xffff) as i16 as i32,
+                              app.origin.y + ((lparam.0 >> 16) & 0xffff) as i16 as i32);
+    match msg {
+        WM_MOUSEMOVE if picking() => {
+            with_app(|app| app.set_hover(screen(app)));
+        }
+        WM_LBUTTONUP if picking() => {
+            with_app(|app| {
+                let (x, y) = app.local(screen(app));
+                let index = ring::hit(app.wheel.items.len(), x, y, SIZE);
+                let files = app.wheel.files.clone();
+                let choice = index.map(|i| app.wheel.items[i].1);
+                app.end_pick();
+                if let Some(choice) = choice {
+                    app.start(files, choice);
+                }
+            });
+        }
+        WM_RBUTTONUP if picking() => {
+            with_app(|app| {
+                let tools = !app.wheel.tools;
+                app.wheel.set_tools(tools);
+                app.paint_wheel();
+            });
+        }
+        WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => {
+            with_app(|app| app.end_pick());
+        }
+        WM_ACTIVATE if (wparam.0 & 0xffff) as u32 == WA_INACTIVE => {
+            with_app(|app| {
+                if app.wheel.picking {
+                    app.end_pick(); // clicked somewhere else
+                }
+            });
+        }
+        _ => return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+    LRESULT(0)
+}
+
+unsafe extern "system" fn ask_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match ask::action(msg, wparam) {
+        Some(action) => {
+            with_app(|app| app.answered(action));
+            LRESULT(0)
+        }
+        None => unsafe { ask::default(hwnd, msg, wparam, lparam) },
+    }
 }
 
 unsafe extern "system" fn status_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
