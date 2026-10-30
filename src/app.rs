@@ -169,8 +169,9 @@ pub fn main(args: &[String]) -> glib::ExitCode {
 
 impl App {
     fn new(gapp: &gtk::Application) -> Rc<App> {
+        // closing (Alt+F4) only hides: the same two windows are reused for every drag
         let wheel_window = gtk::Window::builder().application(gapp).title(WHEEL_TITLE)
-            .decorated(false).resizable(false).build();
+            .decorated(false).resizable(false).hide_on_close(true).build();
         wheel_window.add_css_class("ot-wheel");
         let area = gtk::DrawingArea::builder().content_width(wheel::SIZE).content_height(wheel::SIZE).build();
         wheel_window.set_child(Some(&area));
@@ -659,7 +660,7 @@ impl App {
 impl Status {
     fn new(gapp: &gtk::Application) -> Status {
         let window = gtk::Window::builder().application(gapp).title(STATUS_TITLE)
-            .decorated(false).resizable(false).build();
+            .decorated(false).resizable(false).hide_on_close(true).build();
         window.add_css_class("ot-status");
         window.set_default_size(380, -1);
         let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8)
