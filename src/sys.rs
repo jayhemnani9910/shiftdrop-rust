@@ -112,3 +112,90 @@ pub fn alive(pid: u32) -> bool {
         }
     }
 }
+
+/// A path as a `file:` URL, for LibreOffice's -env:UserInstallation.
+pub fn file_uri(path: &Path) -> String {
+    #[cfg(unix)]
+    let uri = format!("file://{}", path.display());
+    #[cfg(windows)]
+    let uri = format!("file:///{}", path.display().to_string().replace('\\', "/"));
+    uri
+}
+
+/// Nothing to do on Linux: PATH is already the user's.
+#[cfg(unix)]
+pub fn refresh_path() {}
+
+/// Rebuild PATH as a fresh login would see it, plus where the converters hide.
+///
+/// A program started by an installer (or before winget finished) inherits the
+/// PATH from before the converters were installed, so read it from the registry
+/// again. Add winget's links folders, LibreOffice's folder (its installer leaves
+/// PATH alone) and the Ghostscript shipped next to shiftdrop.exe.
+/// Call at startup, before any thread starts.
+#[cfg(windows)]
+pub fn refresh_path() {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let mut dirs: Vec<PathBuf> = vec![];
+    let machine = registry_text(HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment", "Path");
+    let user = registry_text(HKEY_CURRENT_USER, "Environment", "Path");
+    for list in [machine, user].into_iter().flatten() {
+        dirs.extend(std::env::split_paths(&expand(&list)));
+    }
+    let env_dir = |var: &str| std::env::var_os(var).map(PathBuf::from);
+    if let Some(local) = env_dir("LOCALAPPDATA") {
+        dirs.push(local.join(r"Microsoft\WinGet\Links"));
+    }
+    if let Some(programs) = env_dir("ProgramFiles") {
+        dirs.push(programs.join(r"WinGet\Links"));
+    }
+    if let Some(office) = registry_text(HKEY_LOCAL_MACHINE, r"SOFTWARE\LibreOffice\UNO\InstallPath", "") {
+        dirs.push(PathBuf::from(office));
+    }
+    if let Some(here) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
+        dirs.push(here.join(r"tools\ghostscript\bin"));
+    }
+    if let Some(current) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&current));
+    }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| !d.as_os_str().is_empty() && seen.insert(d.to_string_lossy().to_lowercase()));
+    if let Ok(path) = std::env::join_paths(dirs) {
+        // SAFETY: called at startup, before any other thread exists
+        unsafe { std::env::set_var("PATH", path) };
+    }
+}
+
+#[cfg(windows)]
+fn registry_text(root: windows::Win32::System::Registry::HKEY, key: &str, value: &str) -> Option<String> {
+    use windows::Win32::System::Registry::{RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW};
+    use windows::core::HSTRING;
+    let (key, value) = (HSTRING::from(key), HSTRING::from(value));
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+    let mut bytes = 0u32;
+    unsafe {
+        if RegGetValueW(root, &key, &value, flags, None, None, Some(&mut bytes)).is_err() {
+            return None;
+        }
+        let mut buf = vec![0u16; bytes as usize / 2 + 1];
+        if RegGetValueW(root, &key, &value, flags, None, Some(buf.as_mut_ptr().cast()), Some(&mut bytes)).is_err() {
+            return None;
+        }
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..len]))
+    }
+}
+
+/// `%SystemRoot%\system32` -> `C:\Windows\system32`.
+#[cfg(windows)]
+fn expand(text: &str) -> String {
+    use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
+    use windows::core::HSTRING;
+    let source = HSTRING::from(text);
+    unsafe {
+        let needed = ExpandEnvironmentStringsW(&source, None);
+        let mut buf = vec![0u16; needed as usize];
+        let written = ExpandEnvironmentStringsW(&source, Some(&mut buf)) as usize;
+        String::from_utf16_lossy(&buf[..written.saturating_sub(1)])
+    }
+}

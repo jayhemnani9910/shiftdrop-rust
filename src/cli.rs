@@ -122,6 +122,7 @@ pub fn wanted(argv: &[String]) -> bool {
 }
 
 pub fn main() -> ExitCode {
+    crate::sys::refresh_path();
     cli(Cli::parse()).unwrap_or_else(|e| {
         eprintln!("{e}");
         ExitCode::FAILURE

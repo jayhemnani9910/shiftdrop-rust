@@ -336,7 +336,7 @@ fn magick(src: &Path, dst: &Path, target: Fmt) -> Step {
 /// LibreOffice writes `<stem>.<ext>` into --outdir; convert in a private dir, then move.
 fn soffice(src: &Path, dst: &Path, filter: &str, workdir: &Path, infilter: Option<&str>) -> Vec<Step> {
     let profile = workdir.join("profile");
-    let mut args = vec!["soffice".to_string(), format!("-env:UserInstallation=file://{}", profile.display()),
+    let mut args = vec!["soffice".to_string(), format!("-env:UserInstallation={}", crate::sys::file_uri(&profile)),
                         "--headless".into()];
     if let Some(infilter) = infilter {
         args.push(format!("--infilter={infilter}"));
