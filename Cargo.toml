@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Drag a file, hold Shift, pick a format. Local file converter for GNOME on Linux"
 repository = "https://github.com/jayhemnani9910/shiftdrop-rust"
+license = "MIT"
 
 # System dependencies (apt):
 #   - libgtk-4-dev                  to build the UI
