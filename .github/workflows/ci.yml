@@ -1,5 +1,5 @@
 # Build and test on every push, on both systems. The Windows job also keeps
-# the two .exe files as a downloadable artifact, for trying a branch on a PC.
+# the installer and the two .exe files as a downloadable artifact, for trying a branch on a PC.
 name: CI
 
 on:
@@ -29,9 +29,11 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked --test plans
       - run: cargo build --locked --release
+      - run: pwsh packaging/windows/build-installer.ps1 -Version 0.0.0
       - uses: actions/upload-artifact@v4
         with:
           name: shiftdrop-windows
           path: |
+            target/ShiftDrop-Setup-x64.exe
             target/release/shiftdrop.exe
             target/release/shiftdrop-cli.exe
