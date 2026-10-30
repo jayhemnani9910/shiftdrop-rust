@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=ShiftDrop
+Exec=/usr/bin/shiftdrop --gapplication-service
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
