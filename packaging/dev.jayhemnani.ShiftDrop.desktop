@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=ShiftDrop
+Comment=Drag a file, hold Shift, pick a format
+Exec=/usr/bin/shiftdrop %F
+Terminal=false
+NoDisplay=true

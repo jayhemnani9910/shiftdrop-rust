@@ -2,6 +2,8 @@
 
 Drag a file, hold **Shift**, drop it on a format. A local file converter for GNOME on Wayland.
 
+<!-- launch video: in GitHub's README editor, drag out/shiftdrop-launch-16x9.mp4 onto the next line -->
+
 ```
 Shift while dragging          format wheel: video, image, audio, PDF, text, subtitles
 Shift + Ctrl while dragging   tools wheel:  compress, metadata, resize, rotate, trim, normalize, PDF, merge
@@ -33,12 +35,23 @@ src/
 
 ## Install
 
-Needs GNOME 49+ on Wayland, a Rust toolchain (`cargo`), plus:
+Needs GNOME 49+ on Wayland (x86_64 for the ready-made builds). Pick one:
 
 ```
+# for your user, no Rust needed: downloads the latest release
+curl -fsSL https://raw.githubusercontent.com/jayhemnani9910/shiftdrop-rust/main/install.sh | sh
+sudo apt install ffmpeg imagemagick ghostscript poppler-utils libreoffice-writer
+
+# for every user on the machine, converters included
+wget https://github.com/jayhemnani9910/shiftdrop-rust/releases/latest/download/shiftdrop_amd64.deb
+sudo apt install ./shiftdrop_amd64.deb
+
+# from source
 sudo apt install libgtk-4-dev ffmpeg imagemagick ghostscript poppler-utils libreoffice-writer
 ./install.sh
 ```
+
+The `.deb` leaves out the Files right-click script (Files only reads those per user); the other two add it.
 
 GNOME only notices a new extension at login. Either log out and back in, or load it into the running
 shell: Alt+F2, `lg`, Evaluator tab, paste:
@@ -47,7 +60,10 @@ shell: Alt+F2, `lg`, Evaluator tab, paste:
 (async () => { const em = Main.extensionManager, uuid = 'shiftdrop@jayhemnani'; const ext = em.createExtensionObject(uuid, imports.gi.Gio.File.new_for_path(imports.gi.GLib.get_home_dir() + '/.local/share/gnome-shell/extensions/' + uuid), 2); await em.loadExtension(ext); })()
 ```
 
-`gnome-extensions info shiftdrop@jayhemnani` should then say `State: ACTIVE`. `./uninstall.sh` removes everything it added.
+`gnome-extensions info shiftdrop@jayhemnani` should then say `State: ACTIVE`, else run `gnome-extensions enable shiftdrop@jayhemnani`.
+
+To remove: `./uninstall.sh`, or `curl -fsSL https://raw.githubusercontent.com/jayhemnani9910/shiftdrop-rust/main/uninstall.sh | sh`,
+or `sudo apt remove shiftdrop` for the `.deb`.
 
 Changes to the app apply on the next drag after `./install.sh` and `pkill -f "shiftdrop --gapplication-service"`.
 Changes to `extension.js` need a logout: the shell keeps the first copy it loaded.

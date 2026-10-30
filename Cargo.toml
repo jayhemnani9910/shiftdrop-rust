@@ -3,6 +3,8 @@ name = "shiftdrop"
 version = "0.1.0"
 edition = "2024"
 description = "Drag a file, hold Shift, pick a format. Local file converter for GNOME on Linux"
+repository = "https://github.com/jayhemnani9910/shiftdrop-rust"
+license = "MIT"
 
 # System dependencies (apt):
 #   - libgtk-4-dev                  to build the UI
@@ -19,3 +21,26 @@ libc = "0.2.191"
 pangocairo = "0.22.9"
 serde_json = "1.0.154"
 tempfile = "3.27.0"
+
+# `cargo deb` builds the .deb: system-wide, so the per-user Files script is
+# left out (Files only reads those from ~/.local/share/nautilus/scripts).
+[package.metadata.deb]
+maintainer = "Jay Hemnani <193022578+jayhemnani9910@users.noreply.github.com>"
+section = "graphics"
+extended-description = """\
+Drag a file, hold Shift, and a wheel of formats opens under the pointer: drop \
+it on one to convert. Shift+Ctrl opens tools instead (compress, trim, strip \
+metadata, resize, merge PDFs). Everything runs locally with ffmpeg, \
+ImageMagick, Ghostscript and Poppler. Needs GNOME 49+ on Wayland; after \
+installing, log out and back in once, then run \
+`gnome-extensions enable shiftdrop@jayhemnani`."""
+depends = "$auto, ffmpeg, imagemagick, ghostscript, poppler-utils"
+recommends = "libreoffice-writer, libheif-examples, libjpeg-turbo-progs"
+assets = [
+  ["target/release/shiftdrop", "usr/bin/", "755"],
+  ["extension/shiftdrop@jayhemnani/*", "usr/share/gnome-shell/extensions/shiftdrop@jayhemnani/", "644"],
+  ["packaging/dev.jayhemnani.ShiftDrop.service", "usr/share/dbus-1/services/", "644"],
+  ["packaging/dev.jayhemnani.ShiftDrop.desktop", "usr/share/applications/", "644"],
+  ["packaging/autostart.desktop", "etc/xdg/autostart/dev.jayhemnani.ShiftDrop.desktop", "644"],
+  ["README.md", "usr/share/doc/shiftdrop/", "644"],
+]
