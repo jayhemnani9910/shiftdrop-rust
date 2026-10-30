@@ -135,14 +135,10 @@ pub fn available_targets(sources: &[Fmt], which: impl Fn(&str) -> bool) -> Vec<F
 
 /// True when `program` is on PATH, like `shutil.which`; for `ffmpeg:x`, when ffmpeg has encoder x.
 pub fn which(program: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    if let Some(encoder) = program.strip_prefix("ffmpeg:") {
-        return crate::media::ffmpeg_has_encoder(encoder);
+    match program.strip_prefix("ffmpeg:") {
+        Some(encoder) => crate::media::ffmpeg_has_encoder(encoder),
+        None => crate::sys::on_path(program),
     }
-    let Some(path) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&path).any(|dir| {
-        fs::metadata(dir.join(program)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    })
 }
 
 // --- video and audio ----------------------------------------------------------

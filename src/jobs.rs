@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Mutex;
@@ -13,6 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::convert::{Job, Step, plan_conversion};
 use crate::formats::{Category, Fmt, detect, name};
 use crate::media::{gpu_h264, output_with_timeout, probe};
+use crate::sys;
 
 // Images and documents run this many at a time: measured 2.5-2.8x faster for 16
 // screenshots on 8 cores, and 8 at a time adds little. Video and audio run one
@@ -26,15 +27,11 @@ const CANCEL_POLL: Duration = Duration::from_millis(100);
 /// mid-write (pkill, logout, out of memory) leaves its file here, and
 /// sweep_leftovers() removes the half-written outputs on the next start.
 pub fn pending_dir() -> PathBuf {
-    let cache = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache"));
-    cache.join("shiftdrop").join("pending")
+    sys::cache_dir().join("shiftdrop").join("pending")
 }
 
 pub fn pdf_pages(path: &Path) -> u32 {
-    let mut cmd = Command::new("pdfinfo");
+    let mut cmd = sys::command("pdfinfo");
     cmd.arg(path);
     let Some(out) = output_with_timeout(cmd, Duration::from_secs(20)) else { return 1 };
     String::from_utf8_lossy(&out.stdout)
@@ -122,7 +119,7 @@ pub fn sweep_leftovers_in(pending: &Path) -> Vec<PathBuf> {
             continue;
         }
         let pid = name(&record).split('-').next().and_then(|p| p.parse().ok());
-        if pid.is_none_or(alive) {
+        if pid.is_none_or(sys::alive) {
             continue;
         }
         for line in fs::read_to_string(&record).unwrap_or_default().lines() {
@@ -148,11 +145,6 @@ fn mark_pending(pending: &Path, job: &Job) -> std::io::Result<PathBuf> {
     let lines: String = job.outputs.iter().map(|out| format!("{}\n", out.display())).collect();
     fs::write(&record, lines)?;
     Ok(record)
-}
-
-fn alive(pid: i32) -> bool {
-    // signal 0 only checks; EPERM means it exists but belongs to someone else
-    unsafe { libc::kill(pid, 0) == 0 || *libc::__errno_location() != libc::ESRCH }
 }
 
 /// Run all jobs; one failing doesn't stop the others.
@@ -241,7 +233,7 @@ fn remove_outputs(job: &Job) {
 }
 
 fn run_command(cmd: &[String], duration: Option<f64>, on_progress: &dyn Fn(f64), cancel: &AtomicBool) -> Result<(), String> {
-    let spawned = Command::new(&cmd[0]).args(&cmd[1..])
+    let spawned = sys::command(&cmd[0]).args(&cmd[1..])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn();
     let mut child = match spawned {

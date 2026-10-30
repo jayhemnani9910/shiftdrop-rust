@@ -4,10 +4,10 @@
 //! we can write it. What a file converts into comes from a few rules about
 //! categories, not from a per-format table.
 use std::collections::HashSet;
-use std::ffi::CString;
 use std::fs;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+
+use crate::sys;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Category {
@@ -135,8 +135,7 @@ pub fn common_targets(sources: &[Fmt]) -> Vec<Fmt> {
 
 /// Where outputs go when the source's folder can't be written (a mounted archive, a read-only share).
 pub fn fallback_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    home.join("ShiftDrop")
+    sys::home().join("ShiftDrop")
 }
 
 /// Next to the source (or in `fallback_dir()` if that folder is read-only), never overwriting.
@@ -151,7 +150,7 @@ pub fn output_path(source: &Path, ext: &str, suffix: &str, taken: &HashSet<Strin
 pub fn output_path_in(fallback: &Path, source: &Path, ext: &str, suffix: &str, taken: &HashSet<String>) -> PathBuf {
     // a bare `photo.png` has an empty parent, so outputs stay bare too: `photo.jpg`
     let mut folder = source.parent().map(Path::to_path_buf).unwrap_or_default();
-    if !can_write(&folder) {
+    if !sys::can_write(&folder) {
         folder = fallback.to_path_buf();
         let _ = fs::create_dir(&folder);
     }
@@ -186,10 +185,4 @@ pub fn extension(path: &Path) -> String {
 /// The file name as text, for messages.
 pub fn name(path: &Path) -> String {
     path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
-}
-
-fn can_write(folder: &Path) -> bool {
-    let folder = if folder.as_os_str().is_empty() { Path::new(".") } else { folder };
-    let Ok(c) = CString::new(folder.as_os_str().as_bytes()) else { return false };
-    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
 }

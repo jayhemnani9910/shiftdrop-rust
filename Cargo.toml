@@ -14,13 +14,22 @@ license = "MIT"
 #   - libreoffice                   PDF/TXT -> DOCX
 
 [dependencies]
-async-channel = "2.5.0"
 clap = { version = "4.6.7", features = ["derive"] }
-gtk = { version = "0.11.5", package = "gtk4", features = ["v4_12"] }
-libc = "0.2.191"
-pangocairo = "0.22.9"
 serde_json = "1.0.154"
 tempfile = "3.27.0"
+
+# the GTK app and its Shell extension are the Linux front end
+[target.'cfg(target_os = "linux")'.dependencies]
+async-channel = "2.5.0"
+gtk = { version = "0.11.5", package = "gtk4", features = ["v4_12"] }
+pangocairo = "0.22.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
+# 0.62: windows-rs 0.100 split the crates with breaking changes; move once `windows` itself follows
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
 # `cargo deb` builds the .deb: system-wide, so the per-user Files script is
 # left out (Files only reads those from ~/.local/share/nautilus/scripts).

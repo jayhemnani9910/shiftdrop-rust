@@ -1,4 +1,6 @@
 //! Actually run conversions on tiny files made on the spot. Skips a case when its tool is missing.
+//! Unix for now: the helpers call Unix tool names and commands (`true`, `find`).
+#![cfg(unix)]
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
