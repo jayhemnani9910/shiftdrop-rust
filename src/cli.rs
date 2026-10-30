@@ -1,10 +1,8 @@
-//! shiftdrop                          run the app (the extension starts it on demand)
-//! shiftdrop FILE...                  open the wheel for these files, pick by clicking
+//! The command line, shared by `shiftdrop` on Linux and `shiftdrop-cli.exe` on Windows:
+//!
 //! shiftdrop convert --to FMT FILE...
 //! shiftdrop tool NAME FILE... [--start S --end E] [--edge PX]
 //! shiftdrop targets FILE...          what this machine can turn FILE into
-mod app;
-mod wheel;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -14,11 +12,11 @@ use std::sync::atomic::AtomicBool;
 
 use clap::{Parser, Subcommand};
 
-use shiftdrop::convert::{Job, available_targets, which};
-use shiftdrop::formats::{Category, Fmt, detect, name};
-use shiftdrop::jobs::{plan_convert, run_batch};
-use shiftdrop::media::{gpu_h264, probe};
-use shiftdrop::tools::{Params, TOOLS, available_tools, plan_tool};
+use crate::convert::{Job, available_targets, which};
+use crate::formats::{Category, Fmt, detect, name};
+use crate::jobs::{plan_convert, run_batch};
+use crate::media::{gpu_h264, probe};
+use crate::tools::{Params, TOOLS, available_tools, plan_tool};
 
 #[derive(Parser)]
 #[command(name = "shiftdrop", about = "run the app (the extension starts it on demand)")]
@@ -118,14 +116,14 @@ fn cli(args: Cli) -> Result<ExitCode, String> {
     }
 }
 
-fn main() -> ExitCode {
-    let argv: Vec<String> = std::env::args().collect();
-    if argv.get(1).is_some_and(|a| ["convert", "tool", "targets", "-h", "--help"].contains(&a.as_str())) {
-        return cli(Cli::parse()).unwrap_or_else(|e| {
-            eprintln!("{e}");
-            ExitCode::FAILURE
-        });
-    }
-    let code = app::main(&argv);
-    ExitCode::from(code.get() as u8)
+/// Whether these arguments are a command, rather than files for the app.
+pub fn wanted(argv: &[String]) -> bool {
+    argv.get(1).is_some_and(|a| ["convert", "tool", "targets", "-h", "--help"].contains(&a.as_str()))
+}
+
+pub fn main() -> ExitCode {
+    cli(Cli::parse()).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        ExitCode::FAILURE
+    })
 }
