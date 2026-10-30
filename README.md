@@ -3,6 +3,7 @@
 Drag a file, hold **Shift**, drop it on a format. A local file converter for GNOME on Wayland.
 
 <!-- launch video: in GitHub's README editor, drag out/shiftdrop-launch-16x9.mp4 onto the next line -->
+https://github.com/user-attachments/assets/8bd05d02-ee88-4634-89d8-47a888a88cfb
 
 ```
 Shift while dragging          format wheel: video, image, audio, PDF, text, subtitles
