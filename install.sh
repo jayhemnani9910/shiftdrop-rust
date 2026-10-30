@@ -1,7 +1,8 @@
 #!/bin/sh
-# Installs for the current user only. Builds the binary, then everything is a
-# symlink or a small text file pointing back at this checkout; uninstall.sh
-# removes exactly these.
+# Installs for the current user only. Builds the binary and copies it to
+# ~/.local/bin, so `cargo clean` or a branch switch can't break the installed
+# app; the rest is a symlink or a small text file. uninstall.sh removes exactly these.
+# Run it again after changing the code.
 set -eu
 repo="$(cd "$(dirname "$0")" && pwd)"
 uuid="shiftdrop@jayhemnani"
@@ -9,12 +10,14 @@ app_id="dev.jayhemnani.ShiftDrop"
 data="${XDG_DATA_HOME:-$HOME/.local/share}"
 
 cargo build --release --manifest-path "$repo/Cargo.toml"
-bin="$repo/target/release/shiftdrop"
+bin="$HOME/.local/bin/shiftdrop"
 
 mkdir -p "$HOME/.local/bin" "$data/gnome-shell/extensions" "$data/dbus-1/services" \
          "$data/applications" "$data/nautilus/scripts"
 
-ln -sfn "$bin" "$HOME/.local/bin/shiftdrop"
+# copy next to it, then rename: the running service keeps its old file until it restarts
+install -m 755 "$repo/target/release/shiftdrop" "$bin.new"
+mv -f "$bin.new" "$bin"
 ln -sfn "$repo/extension/$uuid" "$data/gnome-shell/extensions/$uuid"
 
 # lets the extension start the app on the first Shift-drag

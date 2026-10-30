@@ -49,7 +49,7 @@ shell: Alt+F2, `lg`, Evaluator tab, paste:
 
 `gnome-extensions info shiftdrop@jayhemnani` should then say `State: ACTIVE`. `./uninstall.sh` removes everything it added.
 
-Changes to the app apply on the next drag after `cargo build --release` and `pkill -f "shiftdrop --gapplication-service"`.
+Changes to the app apply on the next drag after `./install.sh` and `pkill -f "shiftdrop --gapplication-service"`.
 Changes to `extension.js` need a logout: the shell keeps the first copy it loaded.
 
 ## Use without the wheel
