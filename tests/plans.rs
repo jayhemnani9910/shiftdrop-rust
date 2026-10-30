@@ -335,3 +335,22 @@ fn cancel_stops_a_command_that_prints_nothing() {
     });
     assert!(started.elapsed().as_secs() < 2, "took {:?}", started.elapsed());
 }
+
+#[test]
+fn formats_need_their_ffmpeg_encoder() {
+    let no_xvid = |tool: &str| tool != "ffmpeg:libxvid";
+    let offered = available_targets(&[Fmt::Mp4], no_xvid);
+    assert!(!offered.contains(&Fmt::Avi));
+    assert!(offered.contains(&Fmt::Mkv) && offered.contains(&Fmt::Mp3));
+    let no_lame = |tool: &str| tool != "ffmpeg:libmp3lame";
+    assert!(!available_targets(&[Fmt::Wav], no_lame).contains(&Fmt::Mp3));
+}
+
+#[test]
+fn this_machines_ffmpeg_lists_its_encoders() {
+    if !shiftdrop::convert::which("ffmpeg") {
+        return;
+    }
+    assert!(shiftdrop::convert::which("ffmpeg:aac"));
+    assert!(!shiftdrop::convert::which("ffmpeg:no-such-encoder"));
+}

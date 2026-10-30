@@ -93,11 +93,14 @@ impl<T: AsRef<OsStr>> Extend for &Vec<T> {
     fn extend_into(self, v: &mut Vec<String>) { v.extend(self.iter().map(text)) }
 }
 
-// which external program each kind of work needs
-fn needs(source: Fmt, target: Fmt) -> &'static [&'static str] {
-    match source.category() {
+// which external program each kind of work needs; `ffmpeg:x` means ffmpeg built with encoder x
+fn needs(source: Fmt, target: Fmt) -> Vec<String> {
+    let programs: &[&str] = match source.category() {
         Category::Video | Category::Audio | Category::Subtitle if target == Fmt::Txt => &[],
-        Category::Video | Category::Audio | Category::Subtitle => &["ffmpeg"],
+        Category::Video | Category::Audio | Category::Subtitle => {
+            let encoders = ffmpeg_encoders(target).into_iter().map(|e| format!("ffmpeg:{e}"));
+            return std::iter::once("ffmpeg".to_string()).chain(encoders).collect();
+        }
         _ if source == Fmt::Pdf => match target {
             Fmt::Docx => &["soffice"],
             Fmt::Txt => &["pdftotext"],
@@ -106,6 +109,19 @@ fn needs(source: Fmt, target: Fmt) -> &'static [&'static str] {
         _ if source == Fmt::Txt => &["soffice"],
         _ if target == Fmt::Heic => &["magick", "heif-enc"],
         _ => &["magick"],
+    };
+    programs.iter().map(|p| p.to_string()).collect()
+}
+
+/// The encoders writing `target` re-encodes with: the name after `-c:v` / `-c:a` in its settings.
+/// Distro ffmpeg builds differ, and without one of these every conversion to `target` fails.
+fn ffmpeg_encoders(target: Fmt) -> Vec<&'static str> {
+    match target {
+        Fmt::Gif => vec!["gif"],
+        Fmt::Srt => vec!["srt"],
+        Fmt::Vtt => vec!["webvtt"],
+        _ if target.category() == Category::Audio => vec![audio_codec(target)[1]],
+        _ => vec![video_codec(target)[1], sound_in_video(target)[1]],
     }
 }
 
@@ -117,9 +133,12 @@ pub fn available_targets(sources: &[Fmt], which: impl Fn(&str) -> bool) -> Vec<F
         .collect()
 }
 
-/// True when `program` is on PATH, like `shutil.which`.
+/// True when `program` is on PATH, like `shutil.which`; for `ffmpeg:x`, when ffmpeg has encoder x.
 pub fn which(program: &str) -> bool {
     use std::os::unix::fs::PermissionsExt;
+    if let Some(encoder) = program.strip_prefix("ffmpeg:") {
+        return crate::media::ffmpeg_has_encoder(encoder);
+    }
     let Some(path) = std::env::var_os("PATH") else { return false };
     std::env::split_paths(&path).any(|dir| {
         fs::metadata(dir.join(program)).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)

@@ -77,6 +77,23 @@ pub fn gpu_h264() -> bool {
     })
 }
 
+/// True when this machine's ffmpeg can encode with `name`. Reads `ffmpeg -encoders` once per run.
+pub fn ffmpeg_has_encoder(name: &str) -> bool {
+    static ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
+    ENCODERS.get_or_init(|| {
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-hide_banner", "-encoders"]);
+        let Some(out) = output_with_timeout(cmd, Duration::from_secs(15)) else { return vec![] };
+        // after the "------" line: " V....D libx264   description"
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .skip_while(|line| !line.trim_start().starts_with("---"))
+            .skip(1)
+            .filter_map(|line| line.split_whitespace().nth(1).map(str::to_owned))
+            .collect()
+    }).iter().any(|e| e == name)
+}
+
 /// Run a short command and collect its output; None if it can't start or takes too long.
 pub fn output_with_timeout(mut cmd: Command, timeout: Duration) -> Option<Output> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
