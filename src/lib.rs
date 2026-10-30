@@ -4,6 +4,7 @@ pub mod convert;
 pub mod formats;
 pub mod jobs;
 pub mod media;
+pub mod ring;
 pub mod session;
 pub mod sys;
 pub mod tools;
