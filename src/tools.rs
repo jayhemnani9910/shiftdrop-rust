@@ -5,12 +5,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::cmd;
 use crate::convert::{FFMPEG, HDR_TO_SDR, Job, Step, audio_codec_args, audio_steps, video_steps, which};
 use crate::formats::{Category, Fmt, extension, name, output_path};
 use crate::media::Streams;
+use crate::sys::{self, GHOSTSCRIPT};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Arity {
@@ -81,7 +81,7 @@ fn category_program(category: Category) -> &'static str {
     match category {
         IMAGE => "magick",
         VIDEO | AUDIO => "ffmpeg",
-        _ => "gs",
+        _ => GHOSTSCRIPT,
     }
 }
 
@@ -164,7 +164,7 @@ fn compress(src: &Path, fmt: Fmt, taken: &HashSet<String>, streams: &Streams) ->
         }
         _ => {
             let dst = output_path(src, "pdf", "compressed", taken);
-            let step = cmd!["gs", "-sDEVICE=pdfwrite", "-dPDFSETTINGS=/ebook", "-dCompatibilityLevel=1.6",
+            let step = cmd![GHOSTSCRIPT, "-sDEVICE=pdfwrite", "-dPDFSETTINGS=/ebook", "-dCompatibilityLevel=1.6",
                             "-dNOPAUSE", "-dBATCH", "-dQUIET", "-dSAFER", format!("-sOutputFile={}", dst.display()), src];
             (dst, step)
         }
@@ -218,7 +218,7 @@ fn jpegtran_upright(src: &Path, dst: &Path) -> Result<(), String> {
 fn strip_keep_colour(src: &Path, dst: &Path) -> Result<(), String> {
     let tmp = tempfile::Builder::new().prefix("shiftdrop-").tempdir().map_err(|e| e.to_string())?;
     let icc = tmp.path().join("colour.icc");
-    let has_icc = Command::new("magick").arg(src).arg(format!("icc:{}", icc.display()))
+    let has_icc = sys::command("magick").arg(src).arg(format!("icc:{}", icc.display()))
         .output().is_ok_and(|out| out.status.success());
     let profile: Vec<String> = if has_icc { vec!["-profile".into(), icc.display().to_string()] } else { vec![] };
     let png: &[&str] = if extension(src).to_lowercase() == "png" {
@@ -232,7 +232,7 @@ fn strip_keep_colour(src: &Path, dst: &Path) -> Result<(), String> {
 /// Run a command for a function step; its last error line becomes the job's error.
 fn sh(step: Step) -> Result<Vec<u8>, String> {
     let args = step.args();
-    let done = Command::new(&args[0]).args(&args[1..]).output()
+    let done = sys::command(&args[0]).args(&args[1..]).output()
         .map_err(|e| format!("{}: {e}", args[0]))?;
     if !done.status.success() {
         let stderr = String::from_utf8_lossy(&done.stderr);

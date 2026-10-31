@@ -1,12 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::sync::atomic::AtomicBool;
 
-use shiftdrop::convert::{Job, Step, available_targets, plan_conversion, subtitles_to_text};
-use shiftdrop::formats::{Fmt, common_targets, detect, output_path, output_path_in, targets};
-use shiftdrop::jobs::{parse_progress, run};
+#[cfg(unix)]
+use shiftdrop::convert::Step;
+use shiftdrop::convert::{Job, available_targets, plan_conversion, subtitles_to_text};
+use shiftdrop::formats::{Fmt, common_targets, detect, output_path, targets};
+#[cfg(unix)]
+use shiftdrop::formats::output_path_in;
+use shiftdrop::jobs::parse_progress;
+#[cfg(unix)]
+use shiftdrop::jobs::run;
 use shiftdrop::media::{Streams, parse};
 use shiftdrop::tools::{Params, available_tools, plan_tool};
 
@@ -204,6 +210,7 @@ fn trim_never_copies() {
 }
 
 #[test]
+#[cfg(unix)] // uses Unix-only commands or permissions
 fn failed_gpu_step_falls_back() {
     let tmp = tempfile::tempdir().unwrap();
     let dst = tmp.path().join("out.txt");
@@ -216,6 +223,7 @@ fn failed_gpu_step_falls_back() {
 }
 
 #[test]
+#[cfg(unix)] // uses Unix-only commands or permissions
 fn no_fallback_means_the_error_stands() {
     let tmp = tempfile::tempdir().unwrap();
     let mut job = Job::new("x", vec![tmp.path().join("in")], vec![tmp.path().join("out.txt")],
@@ -306,12 +314,14 @@ fn merge_is_one_job() {
 }
 
 #[test]
+#[cfg(unix)] // uses Unix-only commands or permissions
 fn output_goes_to_fallback_when_folder_is_read_only() {
     let tmp = tempfile::tempdir().unwrap();
     let locked = tmp.path().join("locked");
     fs::create_dir(&locked).unwrap();
     let src = locked.join("photo.png");
     fs::write(&src, "").unwrap();
+    use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
     let fallback = tmp.path().join("ShiftDrop");
     let out = output_path_in(&fallback, &src, "jpg", "", &none());
@@ -320,6 +330,7 @@ fn output_goes_to_fallback_when_folder_is_read_only() {
 }
 
 #[test]
+#[cfg(unix)] // uses Unix-only commands or permissions
 fn cancel_stops_a_command_that_prints_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     let mut job = Job::new("x", vec![tmp.path().join("in")], vec![tmp.path().join("out.txt")],

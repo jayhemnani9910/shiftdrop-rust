@@ -2,6 +2,8 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+
+use crate::sys;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,7 +30,7 @@ impl Streams {
 
 /// `Streams::default()` when ffprobe can't read the file.
 pub fn probe(path: &Path) -> Streams {
-    let mut cmd = Command::new("ffprobe");
+    let mut cmd = sys::command("ffprobe");
     cmd.args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"]).arg(path);
     let Some(out) = output_with_timeout(cmd, Duration::from_secs(20)) else { return Streams::default() };
     match serde_json::from_slice(&out.stdout) {
@@ -69,7 +71,7 @@ pub fn gpu_h264() -> bool {
         if !Path::new(RENDER_NODE).exists() {
             return false;
         }
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = sys::command("ffmpeg");
         cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-vaapi_device", RENDER_NODE,
                   "-f", "lavfi", "-i", "color=black:size=64x64:duration=0.1",
                   "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-f", "null", "-"]);
@@ -81,7 +83,7 @@ pub fn gpu_h264() -> bool {
 pub fn ffmpeg_has_encoder(name: &str) -> bool {
     static ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
     ENCODERS.get_or_init(|| {
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = sys::command("ffmpeg");
         cmd.args(["-hide_banner", "-encoders"]);
         let Some(out) = output_with_timeout(cmd, Duration::from_secs(15)) else { return vec![] };
         // after the "------" line: " V....D libx264   description"

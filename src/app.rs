@@ -4,22 +4,21 @@
 //! actions (show-wheel, set-tools, drag-ended) over org.gtk.Actions; the wheel
 //! is a plain drop target, so the dropped file list comes straight from GTK.
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use shiftdrop::convert::{available_targets, which};
-use shiftdrop::formats::{Category, Fmt, detect, fallback_dir, name};
-use shiftdrop::jobs::{plan_convert, run_batch, sweep_leftovers};
-use shiftdrop::media::{gpu_h264, probe};
-use shiftdrop::tools::{Asks, Params, Tool, available_tools, plan_tool};
+use shiftdrop::formats::name;
+use shiftdrop::jobs::sweep_leftovers;
+use shiftdrop::media::probe;
+use shiftdrop::session::{self, BUSY, Choice, MOVE_ONLY, RESIZE_EDGES, Wheel, unreadable_line};
+use shiftdrop::tools::{Asks, Params, Tool};
 
 use crate::wheel;
 
@@ -27,7 +26,6 @@ const APP_ID: &str = "dev.jayhemnani.ShiftDrop";
 const WHEEL_TITLE: &str = "ShiftDrop Wheel"; // the extension places windows by these titles
 const STATUS_TITLE: &str = "ShiftDrop Status";
 const SUCCESS_LINGER: Duration = Duration::from_millis(4000);
-const RESIZE_EDGES: [u32; 7] = [3840, 2560, 1920, 1280, 1080, 720, 512];
 
 /// One line on stderr (the user journal, when D-Bus started us) while the flag file exists.
 /// Same switch as the extension: `touch ~/.cache/shiftdrop-debug`.
@@ -48,10 +46,6 @@ window.ot-status progressbar progress { background: #ff8a1f; }
 window.ot-status button { background: rgba(255, 255, 255, 0.10); color: white; }
 ";
 
-fn plural(n: usize, word: &str) -> String {
-    if n == 1 { format!("{n} {word}") } else { format!("{n} {word}s") }
-}
-
 /// (paths on disk, names of the rest). A phone, a network share or the
 /// trash can hand over files with no local path; those can't be converted.
 fn local_paths(files: &[gio::File]) -> (Vec<PathBuf>, Vec<String>) {
@@ -66,43 +60,10 @@ fn local_paths(files: &[gio::File]) -> (Vec<PathBuf>, Vec<String>) {
     (paths, other)
 }
 
-fn unreadable_line(names: &[String]) -> String {
-    let more = if names.len() > 3 { " …" } else { "" };
-    format!("Skipped {}{more}: not a file on this computer (phone, network or trash). Copy it to a folder first.",
-            names[..names.len().min(3)].join(", "))
-}
-
-/// What a wheel segment does.
-#[derive(Clone, Copy)]
-enum Choice {
-    Convert(Fmt),
-    Tool(&'static Tool),
-}
-
-impl Choice {
-    fn title(self) -> String {
-        match self {
-            Choice::Convert(fmt) => format!("Converting to {}", fmt.label()),
-            Choice::Tool(tool) => tool.title.into(),
-        }
-    }
-}
-
 /// From the work thread to the window.
 enum Update {
     Progress { done: usize, total: usize, fraction: f64 },
     Done { outputs: Vec<PathBuf>, errors: Vec<String> },
-}
-
-/// Ring of formats (or tools). Pick one by dropping files on it, or by clicking.
-#[derive(Default)]
-struct WheelState {
-    files: Vec<PathBuf>,
-    unreadable: Vec<String>, // dropped, but not on this computer's disk
-    tools: bool,
-    items: Vec<(String, Choice)>,
-    hover: Option<usize>,
-    picking: bool, // opened from Files with a known selection: click instead of drop
 }
 
 /// Progress, then the result with Open / Show in Files. Errors stay until closed.
@@ -124,7 +85,7 @@ struct App {
     gapp: gtk::Application,
     wheel_window: gtk::Window,
     area: gtk::DrawingArea,
-    wheel: RefCell<WheelState>,
+    wheel: RefCell<Wheel>,
     status: Status,
     busy: Cell<bool>,
     cancel: RefCell<Arc<AtomicBool>>,
@@ -212,10 +173,9 @@ impl App {
         let app = Rc::downgrade(self);
         self.area.set_draw_func(move |_, cr, w, _h| {
             let Some(app) = app.upgrade() else { return };
-            let (center, subtitle) = app.center();
             let wheel = app.wheel.borrow();
-            let labels: Vec<String> = wheel.items.iter().map(|(l, _)| l.clone()).collect();
-            wheel::draw(cr, &labels, wheel.hover, &center, &subtitle, w);
+            let (center, subtitle) = wheel.center();
+            wheel::draw(cr, &wheel.labels(), wheel.hover, &center, &subtitle, w);
         });
 
         let drop = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY); // never MOVE: the source keeps its file
@@ -263,52 +223,18 @@ impl App {
     }
 
     fn reset_wheel(&self, files: Vec<PathBuf>, tools: bool, picking: bool, unreadable: Vec<String>) {
-        *self.wheel.borrow_mut() = WheelState { files, unreadable, tools, picking, ..Default::default() };
-        self.refresh();
-    }
-
-    fn set_tools(&self, tools: bool) {
-        let mut wheel = self.wheel.borrow_mut();
-        wheel.tools = tools;
-        wheel.hover = None;
-        drop(wheel);
-        self.refresh();
-    }
-
-    fn refresh(&self) {
-        let mut wheel = self.wheel.borrow_mut();
-        let formats: Option<Vec<Fmt>> = wheel.files.iter().map(detect).collect();
-        wheel.items = match formats {
-            Some(formats) if !formats.is_empty() && wheel.tools => available_tools(&formats, which)
-                .into_iter().map(|t| (t.label.to_string(), Choice::Tool(t))).collect(),
-            Some(formats) if !formats.is_empty() => available_targets(&formats, which)
-                .into_iter().map(|f| (f.label(), Choice::Convert(f))).collect(),
-            _ => vec![],
-        };
-        drop(wheel);
+        *self.wheel.borrow_mut() = Wheel::new(files, tools, picking, unreadable);
         self.area.queue_draw();
     }
 
-    fn center(&self) -> (String, String) {
-        let wheel = self.wheel.borrow();
-        let mode = if wheel.tools { "TOOLS" } else { "CONVERT" };
-        if let Some(i) = wheel.hover {
-            return (wheel.items[i].0.clone(), plural(wheel.files.len(), "file"));
-        }
-        let (center, subtitle) = if wheel.files.is_empty() && !wheel.unreadable.is_empty() {
-            ("NOTHING", "not a local file")
-        } else if wheel.files.is_empty() {
-            (mode, "move onto the wheel")
-        } else if wheel.items.is_empty() {
-            ("NOTHING", "can't handle this file")
-        } else if wheel.picking {
-            (mode, "right-click: switch")
-        } else if !wheel.tools {
-            (mode, "Ctrl: tools")
-        } else {
-            (mode, "release Ctrl: formats")
-        };
-        (center.into(), subtitle.into())
+    fn set_tools(&self, tools: bool) {
+        self.wheel.borrow_mut().set_tools(tools);
+        self.area.queue_draw();
+    }
+
+    fn refresh(&self) {
+        self.wheel.borrow_mut().refresh();
+        self.area.queue_draw();
     }
 
     fn set_hover(&self, index: Option<usize>) {
@@ -360,7 +286,7 @@ impl App {
         if !actions.contains(gdk::DragAction::COPY) {
             self.dropping.set(true);
             self.wheel_window.set_visible(false);
-            self.finished(vec![], vec!["That drag only allowed moving the file, so nothing was done.".into()]);
+            self.finished(vec![], vec![MOVE_ONLY.into()]);
             return false;
         }
         self.take_files(value);
@@ -430,7 +356,7 @@ impl App {
 
     fn run_in_background(self: &Rc<Self>, files: Vec<PathBuf>, choice: Choice, params: Params) {
         if self.busy.get() {
-            self.finished(vec![], vec!["Still working on the last batch. Try again when it's done.".into()]);
+            self.finished(vec![], vec![BUSY.into()]);
             return;
         }
         self.busy.set(true);
@@ -442,7 +368,10 @@ impl App {
 
         let (send, updates) = async_channel::unbounded();
         thread::spawn(move || {
-            let (outputs, errors) = work(files, choice, params, &cancel, unreadable, &send);
+            let progress = |done, total, fraction| {
+                let _ = send.send_blocking(Update::Progress { done, total, fraction });
+            };
+            let (outputs, errors) = session::work(&files, choice, &params, &cancel, &unreadable, &progress, &debug);
             let _ = send.send_blocking(Update::Done { outputs, errors });
         });
         let app = self.clone();
@@ -580,24 +509,13 @@ impl App {
         s.buttons.set_visible(true);
         s.open_btn.set_visible(outputs.len() == 1);
         s.show_btn.set_visible(!outputs.is_empty());
-        if !errors.is_empty() {
-            let done = if outputs.is_empty() { String::new() } else { format!("{} done, ", plural(outputs.len(), "file")) };
-            s.title.set_text(&format!("{done}{}", plural(errors.len(), "problem")));
+        let summary = session::summary(&outputs, &errors);
+        s.title.set_text(&summary.title);
+        s.detail.set_text(&summary.detail);
+        s.detail.set_visible(true);
+        if summary.failed {
             s.title.add_css_class("error");
-            s.detail.set_text(&errors[..errors.len().min(4)].join("\n"));
-            s.detail.set_visible(true);
         } else {
-            s.title.set_text(&format!("✓ {} ready", plural(outputs.len(), "file")));
-            let fallback = fallback_dir();
-            let where_ = if outputs.iter().any(|p| p.parent() == Some(fallback.as_path())) {
-                format!(" (in ~/{}: the original's folder is read-only)", name(&fallback))
-            } else {
-                String::new()
-            };
-            let names: Vec<String> = outputs.iter().take(3).map(|p| name(p)).collect();
-            let more = if outputs.len() > 3 { " …" } else { "" };
-            s.detail.set_text(&format!("{}{more}{where_}", names.join(", ")));
-            s.detail.set_visible(true);
             self.linger(SUCCESS_LINGER);
         }
         *s.outputs.borrow_mut() = outputs;
@@ -687,57 +605,4 @@ impl Status {
         Status { window, title, detail, bar, cancel_btn, open_btn, show_btn, buttons,
                  outputs: RefCell::default(), hovered: Cell::new(false), linger: RefCell::default() }
     }
-}
-
-/// Plan and run a batch on the work thread. Returns (outputs, error lines) for the pop-up.
-fn work(files: Vec<PathBuf>, choice: Choice, params: Params, cancel: &AtomicBool, unreadable: Vec<String>,
-        send: &async_channel::Sender<Update>) -> (Vec<PathBuf>, Vec<String>) {
-    let planned = match choice {
-        Choice::Convert(fmt) => plan_convert(&files, fmt),
-        Choice::Tool(tool) => plan_tool_for(tool, &files, &params),
-    };
-    let jobs = match planned {
-        Ok(jobs) => jobs,
-        Err(e) => return (vec![], vec![e]),
-    };
-    let total = jobs.len();
-    let progress = |done: usize, fraction: f64| {
-        let _ = send.send_blocking(Update::Progress { done: done.min(total.saturating_sub(1)), total, fraction });
-    };
-    let finished = |job: &shiftdrop::convert::Job, error: Option<&str>| {
-        let how = if job.used_fallback { " (GPU failed, used CPU)" } else { "" };
-        let result = match error {
-            Some(e) => format!("failed: {e}"),
-            None => format!("ok{how} -> {:?}", job.outputs.iter().map(|p| name(p)).collect::<Vec<_>>()),
-        };
-        debug(&format!("{} {}: {result}", job.title, name(&job.sources[0])));
-    };
-
-    let started = Instant::now();
-    let (outputs, mut errors) = run_batch(jobs, &progress, &finished, cancel);
-    debug(&format!("batch of {total} took {:.2}s", started.elapsed().as_secs_f64()));
-    // the drop was a copy, so every original must still be there
-    errors.extend(files.iter().filter(|f| !f.exists())
-        .map(|f| format!("{}: the original is gone. Check the folder you dragged from.", name(f))));
-    if cancel.load(Ordering::Relaxed) {
-        errors.retain(|e| !e.ends_with(": Cancelled"));
-        errors.push("Cancelled".into());
-    }
-    if !unreadable.is_empty() {
-        errors.push(unreadable_line(&unreadable));
-    }
-    (outputs, errors)
-}
-
-fn plan_tool_for(tool: &Tool, files: &[PathBuf], params: &Params) -> Result<Vec<shiftdrop::convert::Job>, String> {
-    let pairs: Vec<(PathBuf, Fmt)> = files.iter()
-        .map(|f| detect(f).map(|fmt| (f.clone(), fmt)).ok_or_else(|| format!("{}: unknown file type", name(f))))
-        .collect::<Result<_, _>>()?;
-    let is = |fmt: Fmt, category| fmt.category() == category;
-    let media: HashMap<PathBuf, _> = pairs.iter()
-        .filter(|(_, fmt)| is(*fmt, Category::Video) || is(*fmt, Category::Audio))
-        .map(|(f, _)| (f.clone(), probe(f)))
-        .collect();
-    let gpu = tool.id == "trim" && pairs.iter().any(|(_, fmt)| is(*fmt, Category::Video)) && gpu_h264();
-    plan_tool(tool.id, &pairs, params, &media, gpu)
 }

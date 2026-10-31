@@ -1,0 +1,39 @@
+# Build and test on every push, on both systems. The Windows job also keeps
+# the installer and the two .exe files as a downloadable artifact, for trying a branch on a PC.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --test plans
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --test plans
+      - run: cargo build --locked --release
+      - run: pwsh packaging/windows/build-installer.ps1 -Version 0.0.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shiftdrop-windows
+          path: |
+            target/ShiftDrop-Setup-x64.exe
+            target/release/shiftdrop.exe
+            target/release/shiftdrop-cli.exe

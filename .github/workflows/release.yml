@@ -2,6 +2,7 @@
 #   shiftdrop-x86_64-linux.tar.gz   what install.sh downloads
 #   shiftdrop_amd64.deb             sudo apt install ./shiftdrop_amd64.deb
 #   shiftdrop@jayhemnani.zip        the extension, for extensions.gnome.org
+#   ShiftDrop-Setup-x64.exe         Windows installer (added by the windows job)
 # Asset names stay the same every release, so releases/latest/download/<name> always works.
 name: Release
 
@@ -46,3 +47,25 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --title "ShiftDrop $GITHUB_REF_NAME" --generate-notes \
             shiftdrop-x86_64-linux.tar.gz shiftdrop_amd64.deb shiftdrop@jayhemnani.zip
+
+  windows:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test
+        run: cargo test --locked --test plans
+
+      - name: Build
+        run: cargo build --locked --release
+
+      - name: Installer
+        run: pwsh packaging/windows/build-installer.ps1 -Version ("$env:GITHUB_REF_NAME".TrimStart('v'))
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$env:GITHUB_REF_NAME" target/ShiftDrop-Setup-x64.exe
