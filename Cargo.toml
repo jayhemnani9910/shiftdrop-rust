@@ -1,6 +1,6 @@
 [package]
 name = "shiftdrop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Drag a file, hold Shift, pick a format. Local file converter for GNOME on Linux"
 repository = "https://github.com/jayhemnani9910/shiftdrop-rust"
