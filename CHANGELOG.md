@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Windows installer ships Ghostscript's AGPL license and a THIRD-PARTY.txt notice saying where its source is.
 - README rewritten. Speed section now has measurements that can be repeated.
 
 ## [0.2.0] - 2026-10-31
