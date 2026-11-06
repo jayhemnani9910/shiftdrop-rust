@@ -4,6 +4,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-06
+
 ### Added
 
 - Demo GIF in the README, contributing guide, issue and PR templates, this changelog.
@@ -52,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Cancel stops commands that print nothing.
 - Hide the wheel and status windows on close instead of destroying them.
 
-[Unreleased]: https://github.com/jayhemnani9910/shiftdrop-rust/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jayhemnani9910/shiftdrop-rust/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/jayhemnani9910/shiftdrop-rust/compare/v0.2.0...v0.2.2
 [0.2.0]: https://github.com/jayhemnani9910/shiftdrop-rust/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jayhemnani9910/shiftdrop-rust/releases/tag/v0.1.0
