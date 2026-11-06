@@ -1,0 +1,18 @@
+Third-party software in the ShiftDrop Windows installer
+=======================================================
+
+Ghostscript 10.08.0
+  Files:    tools\ghostscript\bin\gswin64c.exe, tools\ghostscript\bin\gsdll64.dll
+  License:  GNU Affero General Public License v3 (AGPL-3.0), full text in
+            tools\ghostscript\COPYING
+  Author:   Artifex Software, Inc.
+  Binaries: unchanged, from the official Windows build gs10080w64.exe,
+            https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/tag/gs10080
+  Source:   the exact source of this version is the tag ghostpdl-10.08.0,
+            https://github.com/ArtifexSoftware/ghostpdl/tree/ghostpdl-10.08.0
+            and the release archives ghostscript-10.08.0.tar.gz and
+            ghostpdl-10.08.0.tar.gz on the download page above.
+
+FFmpeg, ImageMagick, Poppler and LibreOffice are not part of this installer.
+If you tick them during setup, winget downloads their own installers, which
+come with their own licenses.

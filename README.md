@@ -176,8 +176,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licenses
 
-ShiftDrop is MIT licensed (`LICENSE`). The Windows installer also ships Ghostscript, which is AGPL; its
-source is at <https://github.com/ArtifexSoftware/ghostpdl>.
+ShiftDrop is MIT licensed (`LICENSE`). The Windows installer also ships Ghostscript 10.08.0, which is
+AGPL-3.0. The installer puts its license in `tools\ghostscript\COPYING` and a notice in `THIRD-PARTY.txt`
+([packaging/windows/THIRD-PARTY.txt](packaging/windows/THIRD-PARTY.txt)); its exact source is the
+[`ghostpdl-10.08.0`](https://github.com/ArtifexSoftware/ghostpdl/tree/ghostpdl-10.08.0) tag.
 
 ## Code signing policy
 

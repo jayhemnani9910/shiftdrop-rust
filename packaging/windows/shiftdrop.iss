@@ -46,7 +46,8 @@ Source: "{#SourceDir}\shiftdrop.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\shiftdrop-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE"; DestDir: "{app}"
 Source: "{#SourceDir}\README.md"; DestDir: "{app}"
-; Ghostscript (AGPL; source: https://github.com/ArtifexSoftware/ghostpdl), found by the app here
+Source: "{#SourceDir}\THIRD-PARTY.txt"; DestDir: "{app}"
+; Ghostscript (AGPL, license in tools\ghostscript\COPYING, source in THIRD-PARTY.txt), found by the app here
 Source: "{#SourceDir}\tools\ghostscript\*"; DestDir: "{app}\tools\ghostscript"; Flags: recursesubdirs ignoreversion
 
 [Icons]
