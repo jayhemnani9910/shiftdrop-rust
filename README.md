@@ -1,9 +1,25 @@
 # ShiftDrop
 
-Drag a file, hold **Shift**, drop it on a format. A local file converter for GNOME on Wayland.
+![Dragging sunset.png in GNOME Files, holding Shift, and dropping it on JPG in the wheel. Then doing the same with Shift and Ctrl to compress trip.mp4.](docs/demo.gif)
 
-<!-- launch video: in GitHub's README editor, drag out/shiftdrop-launch-16x9.mp4 onto the next line -->
-https://github.com/user-attachments/assets/8bd05d02-ee88-4634-89d8-47a888a88cfb
+Drag a file, hold Shift, drop it on a format: a local file converter for GNOME and Windows.
+
+```
+curl -fsSL https://raw.githubusercontent.com/jayhemnani9910/shiftdrop-rust/main/install.sh | sh
+```
+
+[![CI](https://github.com/jayhemnani9910/shiftdrop-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jayhemnani9910/shiftdrop-rust/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+That line needs GNOME 49+ on Wayland and x86_64. It doesn't install the converters, so add those too:
+
+```
+sudo apt install ffmpeg imagemagick ghostscript poppler-utils libreoffice-writer
+```
+
+GNOME only notices a new extension at login, so log out and back in once. [Other ways to install](#install), and [Windows](#windows).
+
+## Use
 
 ```
 Shift while dragging          format wheel: video, image, audio, PDF, text, subtitles
@@ -18,7 +34,24 @@ Drops are only ever taken as a copy, so the file you dragged stays where it was.
 Cancel in the status pop-up stops a job and removes what it wrote. A job killed some other way
 (`pkill`, logout) has its half-written file removed the next time the app starts.
 
+There's a command line too:
+
+```
+shiftdrop targets clip.mp4
+shiftdrop convert --to webm clip.mp4
+shiftdrop tool trim clip.mp4 --start 2 --end 9
+```
+
+The launch film (36 s):
+
+https://github.com/user-attachments/assets/8bd05d02-ee88-4634-89d8-47a888a88cfb
+
 ## How it works
+
+Wayland apps can't see other apps' drags or place their own windows, but the shell can. So a small GNOME Shell
+extension watches for a drag and the Shift key, then asks the app over D-Bus to show the wheel and puts it under
+the pointer. The wheel is an ordinary drop target, so the app gets the file list the normal way. It then runs
+ffmpeg, ImageMagick, Ghostscript, Poppler or LibreOffice on your computer. Nothing is sent anywhere.
 
 ```
 extension/   GNOME Shell extension. Sees drags start and end and the Shift key (Wayland apps can't),
@@ -61,8 +94,7 @@ sudo apt install libgtk-4-dev ffmpeg imagemagick ghostscript poppler-utils libre
 
 The `.deb` leaves out the Files right-click script (Files only reads those per user); the other two add it.
 
-GNOME only notices a new extension at login. Either log out and back in, or load it into the running
-shell: Alt+F2, `lg`, Evaluator tab, paste:
+If you don't want to log out, load the extension into the running shell: Alt+F2, `lg`, Evaluator tab, paste:
 
 ```js
 (async () => { const em = Main.extensionManager, uuid = 'shiftdrop@jayhemnani'; const ext = em.createExtensionObject(uuid, imports.gi.Gio.File.new_for_path(imports.gi.GLib.get_home_dir() + '/.local/share/gnome-shell/extensions/' + uuid), 2); await em.loadExtension(ext); })()
@@ -72,9 +104,6 @@ shell: Alt+F2, `lg`, Evaluator tab, paste:
 
 To remove: `./uninstall.sh`, or `curl -fsSL https://raw.githubusercontent.com/jayhemnani9910/shiftdrop-rust/main/uninstall.sh | sh`,
 or `sudo apt remove shiftdrop` for the `.deb`.
-
-Changes to the app apply on the next drag after `./install.sh` and `pkill -f "shiftdrop --gapplication-service"`.
-Changes to `extension.js` need a logout: the shell keeps the first copy it loaded.
 
 ## Windows
 
@@ -91,19 +120,33 @@ in a program running as administrator can't reach the wheel; Windows keeps those
 what each drag did to `%LOCALAPPDATA%\shiftdrop\shiftdrop.log`. On Windows the command line is
 `shiftdrop-cli.exe`.
 
-## Use without the wheel
+## Speed
+
+Video and audio run one at a time. Images and documents run 4 at a time.
 
 ```
-shiftdrop targets clip.mp4
-shiftdrop convert --to webm clip.mp4
-shiftdrop tool trim clip.mp4 --start 2 --end 9
+container change, codec already fits   copy, no re-encode
+re-encode to MP4/MOV/MKV               GPU H.264 at qp 26, or CPU x264 (fast, crf 21) when the GPU can't
+re-encode to WebM                      AV1 (SVT, preset 8, crf 35)
+compress video                         CPU x264 (faster, crf 28)
 ```
 
-## Tests
+One run on my laptop (i7-11370H, 8 threads, Intel GPU), with a generated, deliberately noisy 20 s clip at
+1080x1920 and 60 fps, 426 MB:
 
 ```
-cargo test     # planned commands + real conversions on tiny generated files, a few seconds
+to MKV, copy         0.8s
+to M4A, copy         0.3s
+to MOV, copy         0.5s
+to WebM             37.2s   24.3 MB
+compress            21.2s    9.6 MB
 ```
+
+16 generated 1920x1080 PNGs: WebP 7.6s, AVIF 6.5s, JPG 0.8s.
+
+HDR (PQ/HLG) is kept when copying or writing AV1, and tone-mapped to SDR for H.264, Xvid and WMV.
+Rotated phone videos stay upright. Removing metadata keeps the colour profile; with `jpegtran` installed
+(`libjpeg-turbo-progs`) JPEGs are cleaned losslessly.
 
 ## Debugging the drag
 
@@ -123,6 +166,14 @@ gnome-extensions info shiftdrop@jayhemnani    # State: ACTIVE. OUT OF DATE means
 Then do one Shift-drag with the debug flag on (above). `show-wheel ok` without `wheel placed` means the
 Shell no longer hands over the window the way `_onWindowCreated` expects.
 
+## Not yet
+
+Crop, redact, annotate and other tools that need a canvas. Archives.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Licenses
 
 ShiftDrop is MIT licensed (`LICENSE`). The Windows installer also ships Ghostscript, which is AGPL; its
@@ -139,26 +190,3 @@ GitHub Actions from its own source are signed.
 
 Privacy: ShiftDrop converts files on your computer and sends nothing anywhere. The Windows installer
 downloads converters with winget only for the boxes you tick.
-
-## Speed
-
-Measured on this machine (8 cores, Intel GPU), 1080x1920 60 fps phone clip. Quality is SSIM against the
-source: 1.0 is identical, above ~0.98 looks the same.
-
-```
-container change, codec already fits      copy, no re-encode     116s clip -> WebM 1.4s, MKV 0.4s, M4A 0.2s   SSIM 1.000
-re-encode to MP4/MOV/MKV                   GPU H.264 qp 26        busiest 20s: 6.0s, 31.5 MB, 0.989
-                                           (CPU x264 fallback)    busiest 20s: 36.4s, 25.6 MB, 0.990
-re-encode to WebM                          AV1 (SVT, preset 8)    20s: 35.6s, 5.6 MB, 0.993   (VP9 was 75.5s, 6.8 MB, 0.992)
-compress video                             CPU x264 faster crf28  20s: 16.7s, 4.0 MB, 0.987   (GPU is ~40% bigger at equal SSIM)
-16 screenshots -> WebP / AVIF / JPG        4 at a time            0.47s / 2.2s / 0.22s   (one at a time: 1.29s / 5.4s / 0.58s)
-```
-
-The Intel driver offers only fixed-qp for GPU H.264, so it can't adapt to busy footage; qp 26 keeps sizes
-reasonable. HDR (PQ/HLG) is kept when copying or writing AV1, and tone-mapped to SDR for H.264, Xvid and WMV.
-Rotated phone videos stay upright. Removing metadata keeps the colour profile; with `jpegtran` installed
-(`libjpeg-turbo-progs`) JPEGs are cleaned losslessly.
-
-## Not yet
-
-Crop, redact, annotate and other tools that need a canvas. Archives. A cancel button for long jobs.
