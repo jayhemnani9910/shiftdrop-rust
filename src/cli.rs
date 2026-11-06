@@ -19,7 +19,7 @@ use crate::media::{gpu_h264, probe};
 use crate::tools::{Params, TOOLS, available_tools, plan_tool};
 
 #[derive(Parser)]
-#[command(name = "shiftdrop", about = "run the app (the extension starts it on demand)")]
+#[command(version, name = "shiftdrop", about = "run the app (the extension starts it on demand)")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -118,7 +118,7 @@ fn cli(args: Cli) -> Result<ExitCode, String> {
 
 /// Whether these arguments are a command, rather than files for the app.
 pub fn wanted(argv: &[String]) -> bool {
-    argv.get(1).is_some_and(|a| ["convert", "tool", "targets", "-h", "--help"].contains(&a.as_str()))
+    argv.get(1).is_some_and(|a| ["convert", "tool", "targets", "-h", "--help", "-V", "--version"].contains(&a.as_str()))
 }
 
 pub fn main() -> ExitCode {
