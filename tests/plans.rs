@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 #[cfg(unix)]
 use std::sync::atomic::AtomicBool;
 
@@ -364,4 +365,22 @@ fn this_machines_ffmpeg_lists_its_encoders() {
     }
     assert!(shiftdrop::convert::which("ffmpeg:aac"));
     assert!(!shiftdrop::convert::which("ffmpeg:no-such-encoder"));
+}
+
+#[test]
+fn cli_version_flag() {
+    let flags = ["--version", "-V"];
+    let bins = [env!("CARGO_BIN_EXE_shiftdrop"), env!("CARGO_BIN_EXE_shiftdrop-cli")];
+    let expected_output = format!("shiftdrop {}", env!("CARGO_PKG_VERSION"));
+
+    for bin in bins {
+        for flag in flags {
+            let command = Command::new(bin)
+                .arg(flag).output().expect("Failed to execute binary");
+            assert!(command.status.success(), "Binary {bin} failed with flag {flag}");
+            let output = String::from_utf8_lossy(&command.stdout);
+
+            assert_eq!(output.trim(), expected_output, "Unexpected output from bin {bin} with flag {flag}");
+        }
+    }
 }
